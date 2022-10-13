@@ -27,19 +27,19 @@ Usage:
 """
 class LineEditor:
   __pointer = 1
-  __filepath = ""
-  __content = []
-  __undostack = []
-  __undoing = False
+  __path = ""
+  __lines = []
+  __ustack = [] # Stack to mark commands for undo
+  __is_undo = False
   __edited = False
-  __methods = {'o': "insert", 'd': "delete", 'p': "seek",
-               'w': "write", 'u': "undo"}
 
   def __init__(self, file):
-    self.__filepath = file
+    self.__methods = {'o': self.insert, 'd': self.delete, 'p': self.seek,
+                      'w': self.write, 'u': self.undo}
+    self.__path = file
     try:
-      f = open(self.__filepath, "r")
-      for i in f: self.__content.append(i.rstrip())
+      f = open(self.__path, "r")
+      for i in f: self.__lines.append(i.rstrip())
       f.close()
     except FileNotFoundError: print("**New File**")
     
@@ -50,11 +50,9 @@ class LineEditor:
         cmds.remove(i)
     if len(cmds) == 0: return False
     if cmds[0] in self.__methods:
-      exec_cmd = [ "self.", self.__methods[cmds[0]], "("]
-      if len(cmds) > 1: exec_cmd += ['"', cmds[1], '"']
-      if len(cmds) > 2: exec_cmd += [', "', cmds[2], '"']
-      exec_cmd += ')'
-      exec(''.join(exec_cmd))
+      func = self.__methods[cmds[0]]
+      func(cmds[1] if len(cmds) > 1 else None,
+           cmds[2] if len(cmds) > 2 else None)
     elif cmds[0] == "q":
       if self.__edited:
         resp = input("Not saved, really quit? (y/N) ")
@@ -64,63 +62,62 @@ class LineEditor:
       print("Invalid command")
     return False
 
+  def __is_out_of_bound(self, lower, pos):
+    if pos < lower or pos > len(self.__lines):
+      print("Out of bound")
+      return True
+    return False
+
   def insert(self, pos, newline=None):
     pos = int(pos)
-    if pos < 0 or pos > len(self.__content):
-      print("Out of bound")
-      return
+    if self.__is_out_of_bound(0, pos): return
     if not newline: newline = input("> ")
-    self.__content.insert(pos, newline.rstrip())
-    if self.__undoing:
-      self.__undoing = False
-    else:
-      self.__undostack.append(''.join(["d ", str(pos + 1)]))
+    self.__lines.insert(pos, newline.rstrip())
+    if not self.__is_undo:
+      self.__ustack.append(''.join(["d ", str(pos + 1)]))
     self.__edited = True
 
-  def delete(self, pos):
-    pos = int(pos)
-    if pos < 1 or pos > len(self.__content):
-      print("Out of bound")
-      return
-    if self.__undoing:
-      self.__undoing = False
-    else:
-      self.__undostack.append(''.join(
-        ["o ", str(pos - 1), ' ', self.__content[pos - 1]]))
-    print(self.__content.pop(pos - 1))
+  def delete(self, pos, *placeholder):
+    pos = int(pos) - 1
+    if self.__is_out_of_bound(1, pos): return
+    if not self.__is_undo:
+      self.__ustack.append(''.join(["o ", str(pos), ' ', self.__lines[pos]]))
+    print(self.__lines.pop(pos))
     self.__edited = True
     
-  def seek(self, n=None):
-    if n != None: self.__pointer = int(n)
-    if self.__pointer > len(self.__content): self.__pointer = 1
-    for i in self.__content[self.__pointer - 1:self.__pointer + 4]:
+  def seek(self, n=None, *placeholder):
+    if n != None:
+      try:
+        n = int(n)
+        if self.__is_out_of_bound(1, n): return
+        self.__pointer = n
+      except ValueError: pass
+    if self.__pointer > len(self.__lines): self.__pointer = 1
+    for i in self.__lines[self.__pointer - 1:self.__pointer + 4]:
       print(''.join([str(self.__pointer), ' ', i]))
       self.__pointer += 1
 
-  def undo(self):
-    if len(self.__undostack) == 0:
+  def undo(self, *placeholder):
+    if len(self.__ustack) == 0:
       print("Already at oldest change")
       return
-    self.__undoing = True
-    self.__parse(self.__undostack.pop())
+    self.__is_undo = True
+    self.__parse(self.__ustack.pop())
+    self.__is_undo = False
     
-  def write(self, path=None):
-    if path != None: self.__filepath = path
-    f = open(self.__filepath, 'w')
-    for i in self.__content: f.write(''.join([i, '\n']))
+  def write(self, path=None, *placeholder):
+    if path != None: self.__path = path
+    f = open(self.__path, 'w')
+    for i in self.__lines: f.write(''.join([i, '\n']))
     f.close()
     self.__edited = False
 
   def interact(self):
     cmd = input(''.join(
-      [self.__filepath, " (", str(len(self.__content)), " lines): "]))
+      [self.__path, " (", str(len(self.__lines)), " lines): "]))
     return self.__parse(cmd)
 
-  def __del__(self):
-    self.__filepath = ""
-    self.__content = []
-      
-    
 def start(file):
   instance_sped = LineEditor(file)
   while not instance_sped.interact(): pass
+  del instance_sped
